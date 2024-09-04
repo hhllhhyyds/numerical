@@ -16,6 +16,8 @@ pub fn bisection_solve<T: FloatCore>(
     let (mut a, mut b) = (search_range.start, search_range.end);
     let mut fa = f(a);
 
+    assert!(fa * f(b) < T::zero());
+
     loop {
         if (b - a) / two < x_tol {
             break;
@@ -77,5 +79,24 @@ mod tests {
         );
         let solution = (solution_range.start + solution_range.end) / 2.0;
         assert!(solution.abs_diff_eq(&2.0, 1e-6), "solution = {solution}");
+    }
+
+    #[test]
+    fn test_bisection_solve_3() {
+        let solution_range = bisection_solve(&&|x| 1.0 / x, 1e-6, 1e-8, -1.0..2.1);
+        let solution = (solution_range.start + solution_range.end) / 2.0;
+        println!("solution = {solution}");
+    }
+
+    #[test]
+    fn test_bisection_solve_4() {
+        let solution_range = bisection_solve(
+            &|x: f64| 2.0 * x * x.cos() - 2.0 * x + (x * x * x).sin(),
+            1e-6,
+            1e-14,
+            -0.1..0.2,
+        );
+        let solution = (solution_range.start + solution_range.end) / 2.0;
+        println!("solution = {solution}");
     }
 }
