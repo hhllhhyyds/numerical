@@ -8,7 +8,7 @@ use approx::AbsDiffEq;
 use crate::{permutation::Permutation, FloatCore};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DenseMat<T: FloatCore> {
+pub struct DenseMat<T> {
     nx: usize,
     ny: usize,
     data: Vec<T>,
@@ -67,14 +67,20 @@ impl<T: FloatCore + Sum> DenseMat<T> {
                 < self[(iy, iy)].abs()
         })
     }
+
+    pub fn jacobi_iterate(x_k: &[T], b: &[T], diagonal: &[T], l_plus_u: &Self) -> Vec<T> {
+        assert!(l_plus_u.is_square());
+        let n = l_plus_u.nx;
+        assert!(x_k.len() == n);
+        assert!(b.len() == n);
+        assert!(diagonal.len() == n);
+
+        let x = l_plus_u.mul_vec(x_k);
+        (0..n).map(|i| (b[i] - x[i]) / diagonal[i]).collect()
+    }
 }
 
 impl<T: FloatCore> DenseMat<T> {
-    pub fn new(nx: usize, ny: usize, data: Vec<T>) -> Self {
-        assert!(data.len() == nx * ny);
-        Self { nx, ny, data }
-    }
-
     pub fn zeros(nx: usize, ny: usize) -> Self {
         Self::new(nx, ny, vec![T::zero(); nx * ny])
     }
@@ -85,16 +91,10 @@ impl<T: FloatCore> DenseMat<T> {
         mat
     }
 
-    pub fn shape(&self) -> (usize, usize) {
-        (self.nx, self.ny)
-    }
-
-    pub fn is_square(&self) -> bool {
-        self.shape().0 == self.shape().1
-    }
-
-    pub fn shape_eq(&self, other: &Self) -> bool {
-        self.shape().0 == other.shape().0 && self.shape().1 == other.shape().1
+    pub fn from_diagonal(diag: &[T]) -> Self {
+        let mut mat = Self::zeros(diag.len(), diag.len());
+        (0..diag.len()).for_each(|i| mat[(i, i)] = diag[i]);
+        mat
     }
 
     pub fn gaussian_elimination_solve(mut self, b: &[T]) -> Vec<T> {
@@ -191,24 +191,6 @@ impl<T: FloatCore> DenseMat<T> {
         u.back_substitute_upper_triangle(&c)
     }
 
-    pub fn swap_row(&mut self, iy_0: usize, iy_1: usize) {
-        (0..self.nx).for_each(|ix| self.swap_element((ix, iy_0), (ix, iy_1)))
-    }
-
-    pub fn swap_element(&mut self, pos_a: (usize, usize), pos_b: (usize, usize)) {
-        let pos_a = self.index_2d_to_1d(pos_a);
-        let pos_b = self.index_2d_to_1d(pos_b);
-        self.data.swap(pos_a, pos_b)
-    }
-
-    pub fn transpose(&self) -> Self {
-        let mut m = self.clone();
-        m.nx = self.ny;
-        m.ny = self.nx;
-        (0..self.nx).for_each(|ix| (0..self.ny).for_each(|iy| m[(iy, ix)] = self[(ix, iy)]));
-        m
-    }
-
     pub fn plu(&self) -> (Permutation, Self, Self) {
         assert!(self.is_square());
 
@@ -279,6 +261,51 @@ impl<T: FloatCore> DenseMat<T> {
 
         Self::new(n, n, data)
     }
+}
+
+impl<T: Clone> DenseMat<T> {
+    pub fn transpose(&self) -> Self {
+        let mut m = self.clone();
+        m.nx = self.ny;
+        m.ny = self.nx;
+        (0..self.nx)
+            .for_each(|ix| (0..self.ny).for_each(|iy| m[(iy, ix)] = self[(ix, iy)].clone()));
+        m
+    }
+
+    pub fn diagonal(&self) -> Vec<T> {
+        assert!(self.is_square());
+        (0..self.nx).map(|i| self[(i, i)].clone()).collect()
+    }
+}
+
+impl<T> DenseMat<T> {
+    pub fn new(nx: usize, ny: usize, data: Vec<T>) -> Self {
+        assert!(data.len() == nx * ny);
+        Self { nx, ny, data }
+    }
+
+    pub fn shape(&self) -> (usize, usize) {
+        (self.nx, self.ny)
+    }
+
+    pub fn is_square(&self) -> bool {
+        self.shape().0 == self.shape().1
+    }
+
+    pub fn shape_eq(&self, other: &Self) -> bool {
+        self.shape().0 == other.shape().0 && self.shape().1 == other.shape().1
+    }
+
+    pub fn swap_row(&mut self, iy_0: usize, iy_1: usize) {
+        (0..self.nx).for_each(|ix| self.swap_element((ix, iy_0), (ix, iy_1)))
+    }
+
+    pub fn swap_element(&mut self, pos_a: (usize, usize), pos_b: (usize, usize)) {
+        let pos_a = self.index_2d_to_1d(pos_a);
+        let pos_b = self.index_2d_to_1d(pos_b);
+        self.data.swap(pos_a, pos_b)
+    }
 
     #[inline]
     fn index_2d_to_1d(&self, idx: (usize, usize)) -> usize {
@@ -286,7 +313,7 @@ impl<T: FloatCore> DenseMat<T> {
     }
 }
 
-impl<T: FloatCore> Index<(usize, usize)> for DenseMat<T> {
+impl<T> Index<(usize, usize)> for DenseMat<T> {
     type Output = T;
 
     fn index(&self, index: (usize, usize)) -> &Self::Output {
@@ -294,7 +321,7 @@ impl<T: FloatCore> Index<(usize, usize)> for DenseMat<T> {
     }
 }
 
-impl<T: FloatCore> IndexMut<(usize, usize)> for DenseMat<T> {
+impl<T> IndexMut<(usize, usize)> for DenseMat<T> {
     fn index_mut(&mut self, index: (usize, usize)) -> &mut Self::Output {
         let idx = self.index_2d_to_1d(index);
         &mut self.data[idx]
@@ -585,5 +612,21 @@ mod tests {
         let mat_3 = &mat_0 - &mat_0;
         assert!(mat_2.abs_diff_eq(&mat_1, f64::EPSILON));
         assert!(mat_3.abs_diff_eq(&DenseMat::zeros(2, 3), f64::EPSILON));
+    }
+
+    #[test]
+    fn test_jacobi_iterate_0() {
+        let mat = DenseMat::new(2, 2, vec![3., 1., 1., 2.]);
+        let diagonal = mat.diagonal();
+        let l_plus_u = &mat - &(DenseMat::from_diagonal(&diagonal));
+        let mut x = vec![0.0; 2];
+        let b = [5.0; 2];
+
+        (0..20).for_each(|_| {
+            let tmp = DenseMat::jacobi_iterate(&x, &b, &diagonal, &l_plus_u);
+            x = tmp;
+        });
+
+        (0..x.len()).for_each(|i| assert!(x[i].abs_diff_eq(&[1.0, 2.0][i], 1e-7)))
     }
 }
