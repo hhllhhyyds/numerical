@@ -37,6 +37,29 @@ impl<T: FloatCore + Sum> DenseMat<T> {
     }
 }
 
+impl<T: FloatCore + Sum> DenseMat<T> {
+    pub fn mat_norm(&self) -> Option<T> {
+        (0..self.nx)
+            .map(|ix| {
+                self.data[ix * self.ny..(ix + 1) * self.ny]
+                    .iter()
+                    .map(|x| x.abs())
+                    .sum()
+            })
+            .reduce(T::max)
+    }
+
+    pub fn condition_number(&self) -> Option<T> {
+        if let Some(norm_0) = self.mat_norm() {
+            let inv = self.inverse();
+            let norm_1 = inv.mat_norm().unwrap();
+            Some(norm_0 * norm_1)
+        } else {
+            None
+        }
+    }
+}
+
 impl<T: FloatCore> DenseMat<T> {
     pub fn new(nx: usize, ny: usize, data: Vec<T>) -> Self {
         assert!(data.len() == nx * ny);
@@ -45,6 +68,12 @@ impl<T: FloatCore> DenseMat<T> {
 
     pub fn zeros(nx: usize, ny: usize) -> Self {
         Self::new(nx, ny, vec![T::zero(); nx * ny])
+    }
+
+    pub fn identity(n: usize) -> Self {
+        let mut mat = Self::zeros(n, n);
+        (0..n).for_each(|i| mat[(i, i)] = T::one());
+        mat
     }
 
     pub fn shape(&self) -> (usize, usize) {
@@ -207,9 +236,28 @@ impl<T: FloatCore> DenseMat<T> {
 
     pub fn plu_solve(&self, b: &[T]) -> Vec<T> {
         let (p, l, u) = self.plu();
+        Self::solve_plu(&p, &l, &u, b)
+    }
+
+    pub fn solve_plu(p: &Permutation, l: &Self, u: &Self, b: &[T]) -> Vec<T> {
         let pb = p.mul_vec(b);
         let c = l.back_substitute_lower_triangle(&pb);
         u.back_substitute_upper_triangle(&c)
+    }
+
+    pub fn inverse(&self) -> Self {
+        let n = self.nx;
+        let (p, l, u) = self.plu();
+        let data = (0..n)
+            .map(|i| {
+                let mut v = vec![T::zero(); n];
+                v[i] = T::one();
+                Self::solve_plu(&p, &l, &u, &v)
+            })
+            .collect::<Vec<_>>()
+            .concat();
+
+        Self::new(n, n, data)
     }
 }
 
@@ -422,5 +470,32 @@ mod tests {
             .iter()
             .zip(&[2., 1.])
             .for_each(|(a, b)| assert!(a.abs_diff_eq(b, 1e-10)));
+    }
+
+    #[test]
+    fn test_mat_inverse_0() {
+        let mat = DenseMat::new(3, 3, vec![2., 4., 1., 1., 4., 3., 5., -4., 1.]);
+        let mat_inv = mat.inverse();
+        let mat_mul_inv = mat.mul_mat(&mat_inv);
+        assert!(mat_mul_inv.abs_diff_eq(&DenseMat::identity(3), 1e-14))
+    }
+
+    #[test]
+    fn test_mat_inverse_1() {
+        let mat = DenseMat::new(2, 2, vec![1., 1.0001, 1., 1.]);
+        let cond = mat.condition_number().unwrap();
+        assert!(cond.abs_diff_eq(&40004., 1e-3))
+    }
+
+    #[test]
+    fn test_mat_inverse_2() {
+        let mat = hilbert_mat::<f64>(6);
+        let cond = mat.condition_number().unwrap();
+        println!("condition number of hilbert 6 = {cond:e}");
+        assert!(cond.abs_diff_eq(&2.9070279e7, 1.0));
+
+        let mat = hilbert_mat::<f64>(10);
+        let cond = mat.condition_number().unwrap();
+        println!("condition number of hilbert 10 = {cond:e}");
     }
 }
