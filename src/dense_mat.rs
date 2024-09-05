@@ -5,7 +5,7 @@ use std::{
 
 use approx::AbsDiffEq;
 
-use crate::FloatCore;
+use crate::{permutation::Permutation, FloatCore};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DenseMat<T: FloatCore> {
@@ -146,6 +146,69 @@ impl<T: FloatCore> DenseMat<T> {
     pub fn lu_solve(&self, b: &[T]) -> Vec<T> {
         let (l, u) = self.lu();
         let c = l.back_substitute_lower_triangle(b);
+        u.back_substitute_upper_triangle(&c)
+    }
+
+    pub fn swap_row(&mut self, iy_0: usize, iy_1: usize) {
+        assert!(iy_0 < self.ny);
+        assert!(iy_1 < self.ny);
+
+        for ix in 0..self.nx {
+            let idx_0 = ix * self.ny + iy_0;
+            let idx_1 = ix * self.ny + iy_1;
+            self.data.swap(idx_0, idx_1)
+        }
+    }
+
+    pub fn plu(&self) -> (Permutation, Self, Self) {
+        assert!(self.is_square());
+
+        let mut u_mat = self.clone();
+        let mut p = Permutation::new(self.nx);
+
+        for ix in 0..u_mat.nx {
+            let mut max_abs_iy = ix;
+            let mut max_abs = u_mat[(ix, max_abs_iy)].abs();
+            for iy in (ix + 1)..u_mat.ny {
+                if u_mat[(ix, iy)].abs() > max_abs {
+                    max_abs_iy = iy;
+                    max_abs = u_mat[(ix, iy)].abs();
+                }
+            }
+            if max_abs_iy != ix {
+                u_mat.swap_row(ix, max_abs_iy);
+                p.swap(ix, max_abs_iy);
+            }
+
+            for iy in (ix + 1)..u_mat.ny {
+                let coe = u_mat[(ix, iy)] / u_mat[(ix, ix)];
+                u_mat[(ix, iy)] = coe;
+                for jx in (ix + 1)..self.nx {
+                    u_mat[(jx, iy)] = u_mat[(jx, iy)] - u_mat[(jx, ix)] * coe;
+                }
+            }
+        }
+
+        let mut l_mat = Self::zeros(u_mat.nx, u_mat.ny);
+
+        for ix in 0..u_mat.nx {
+            for iy in ix..u_mat.ny {
+                if ix == iy {
+                    l_mat[(ix, iy)] = T::one();
+                } else {
+                    l_mat[(ix, iy)] = u_mat[(ix, iy)];
+                    u_mat[(ix, iy)] = T::zero();
+                }
+            }
+        }
+
+        (p, l_mat, u_mat)
+    }
+
+    pub fn plu_solve(&self, b: &[T]) -> Vec<T> {
+        let (p, l, u) = self.plu();
+        let pb = p.mul_vec(b);
+        let c = l.back_substitute_lower_triangle(&pb);
         u.back_substitute_upper_triangle(&c)
     }
 }
@@ -307,5 +370,57 @@ mod tests {
         let (l_mat, u_mat) = mat.lu();
         assert!(l_mat.data.iter().filter(|x| x.is_nan()).count() > 0);
         assert!(u_mat.data.iter().filter(|x| x.is_nan()).count() > 0);
+    }
+
+    #[test]
+    fn test_mul_mat() {
+        let m0 = DenseMat::new(1, 4, vec![1.0; 4]);
+        let m1 = DenseMat::new(4, 1, vec![1.0; 4]);
+
+        let m3 = DenseMat::new(1, 1, vec![4.0; 1]);
+        let m4 = DenseMat::new(4, 4, vec![1.0; 16]);
+
+        assert!(m0.mul_mat(&m1).abs_diff_eq(&m4, 1e-14));
+        assert!(m1.mul_mat(&m0).abs_diff_eq(&m3, 1e-14));
+    }
+
+    #[test]
+    fn test_plu_0() {
+        let mat = DenseMat::new(3, 3, vec![2., 4., 1., 1., 4., 3., 5., -4., 1.]);
+        let (p, l_mat, u_mat) = mat.plu();
+        println!("p = {p:?}");
+        println!("l_mat = {l_mat:?}");
+        println!("u_mat = {u_mat:?}");
+    }
+
+    #[test]
+    fn test_plu_1() {
+        let mat = DenseMat::new(3, 3, vec![2., 4., 1., 1., 4., 3., 5., -4., 1.]);
+        let b = [5., 0., 6.];
+        let sol_0 = mat.lu_solve(&b);
+        let sol_1 = mat.plu_solve(&b);
+
+        sol_0
+            .iter()
+            .zip(sol_1.iter())
+            .for_each(|(a, b)| assert!(a == b));
+    }
+
+    #[test]
+    fn test_plu_2() {
+        let mat = DenseMat::new(2, 2, vec![1e-20, 1., 1., 2.]);
+        let b = [1., 4.];
+        let sol_1 = mat.plu_solve(&b);
+        let sol_0 = mat.gaussian_elimination_solve(&b);
+
+        sol_0
+            .iter()
+            .zip(&[0., 1.])
+            .for_each(|(a, b)| assert!(a.abs_diff_eq(b, 1e-10)));
+
+        sol_1
+            .iter()
+            .zip(&[2., 1.])
+            .for_each(|(a, b)| assert!(a.abs_diff_eq(b, 1e-10)));
     }
 }
