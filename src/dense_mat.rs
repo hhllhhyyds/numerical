@@ -1,6 +1,6 @@
 use std::{
     iter::Sum,
-    ops::{Index, IndexMut},
+    ops::{Add, Index, IndexMut, Sub},
 };
 
 use approx::AbsDiffEq;
@@ -91,6 +91,10 @@ impl<T: FloatCore> DenseMat<T> {
 
     pub fn is_square(&self) -> bool {
         self.shape().0 == self.shape().1
+    }
+
+    pub fn shape_eq(&self, other: &Self) -> bool {
+        self.shape().0 == other.shape().0 && self.shape().1 == other.shape().1
     }
 
     pub fn gaussian_elimination_solve(mut self, b: &[T]) -> Vec<T> {
@@ -294,6 +298,36 @@ impl<T: FloatCore> IndexMut<(usize, usize)> for DenseMat<T> {
     fn index_mut(&mut self, index: (usize, usize)) -> &mut Self::Output {
         let idx = self.index_2d_to_1d(index);
         &mut self.data[idx]
+    }
+}
+
+impl<T: FloatCore> Add for &DenseMat<T> {
+    type Output = DenseMat<T>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        assert!(self.shape_eq(rhs));
+
+        let mut m = DenseMat::zeros(self.nx, self.ny);
+        (0..self.nx).for_each(|ix| {
+            (0..self.ny).for_each(|iy| m[(ix, iy)] = self[(ix, iy)] + rhs[(ix, iy)])
+        });
+
+        m
+    }
+}
+
+impl<T: FloatCore> Sub for &DenseMat<T> {
+    type Output = DenseMat<T>;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        assert!(self.shape_eq(rhs));
+
+        let mut m = DenseMat::zeros(self.nx, self.ny);
+        (0..self.nx).for_each(|ix| {
+            (0..self.ny).for_each(|iy| m[(ix, iy)] = self[(ix, iy)] - rhs[(ix, iy)])
+        });
+
+        m
     }
 }
 
@@ -541,5 +575,15 @@ mod tests {
 
         println!("mat_1 = {mat_1:?}, mat_0 transpose = {:?}", mat_0_transpose);
         assert!(mat_0_transpose.abs_diff_eq(&mat_1, f64::EPSILON))
+    }
+
+    #[test]
+    fn test_mat_add_sub() {
+        let mat_0 = DenseMat::new(2, 3, vec![3., 2., 1., 1., -5., 6.]);
+        let mat_1 = DenseMat::new(2, 3, vec![6., 4., 2., 2., -10., 12.]);
+        let mat_2 = &mat_0 + &mat_0;
+        let mat_3 = &mat_0 - &mat_0;
+        assert!(mat_2.abs_diff_eq(&mat_1, f64::EPSILON));
+        assert!(mat_3.abs_diff_eq(&DenseMat::zeros(2, 3), f64::EPSILON));
     }
 }
