@@ -28,24 +28,22 @@ impl<T: FloatCore + Sum> DenseMat<T> {
 
         let nx = other.nx;
         let ny = self.ny;
-        let data = (0..nx)
-            .map(|ix| self.mul_vec(&other.data[(ix * other.ny)..((ix + 1) * other.ny)]))
-            .collect::<Vec<_>>()
-            .concat();
 
-        Self::new(nx, ny, data)
+        let mut mat = Self::zeros(nx, ny);
+
+        for iy in 0..ny {
+            for ix in 0..nx {
+                mat[(ix, iy)] = (0..self.nx).map(|j| self[(j, iy)] * other[(ix, j)]).sum();
+            }
+        }
+
+        mat
     }
-}
 
-impl<T: FloatCore + Sum> DenseMat<T> {
     pub fn mat_norm(&self) -> Option<T> {
-        (0..self.nx)
-            .map(|ix| {
-                self.data[ix * self.ny..(ix + 1) * self.ny]
-                    .iter()
-                    .map(|x| x.abs())
-                    .sum()
-            })
+        assert!(self.is_square());
+        (0..self.ny)
+            .map(|iy| (0..self.nx).map(|ix| self[(ix, iy)].abs()).sum())
             .reduce(T::max)
     }
 
@@ -57,6 +55,17 @@ impl<T: FloatCore + Sum> DenseMat<T> {
         } else {
             None
         }
+    }
+
+    pub fn is_strictly_diagonally_dominant(&self) -> bool {
+        assert!(self.is_square());
+        (0..self.ny).all(|iy| {
+            (0..self.nx)
+                .filter(|ix| *ix != iy)
+                .map(|ix| self[(ix, iy)].abs())
+                .sum::<T>()
+                < self[(iy, iy)].abs()
+        })
     }
 }
 
@@ -179,14 +188,21 @@ impl<T: FloatCore> DenseMat<T> {
     }
 
     pub fn swap_row(&mut self, iy_0: usize, iy_1: usize) {
-        assert!(iy_0 < self.ny);
-        assert!(iy_1 < self.ny);
+        (0..self.nx).for_each(|ix| self.swap_element((ix, iy_0), (ix, iy_1)))
+    }
 
-        for ix in 0..self.nx {
-            let idx_0 = ix * self.ny + iy_0;
-            let idx_1 = ix * self.ny + iy_1;
-            self.data.swap(idx_0, idx_1)
-        }
+    pub fn swap_element(&mut self, pos_a: (usize, usize), pos_b: (usize, usize)) {
+        let pos_a = self.index_2d_to_1d(pos_a);
+        let pos_b = self.index_2d_to_1d(pos_b);
+        self.data.swap(pos_a, pos_b)
+    }
+
+    pub fn transpose(&self) -> Self {
+        let mut m = self.clone();
+        m.nx = self.ny;
+        m.ny = self.nx;
+        (0..self.nx).for_each(|ix| (0..self.ny).for_each(|iy| m[(iy, ix)] = self[(ix, iy)]));
+        m
     }
 
     pub fn plu(&self) -> (Permutation, Self, Self) {
@@ -259,19 +275,25 @@ impl<T: FloatCore> DenseMat<T> {
 
         Self::new(n, n, data)
     }
+
+    #[inline]
+    fn index_2d_to_1d(&self, idx: (usize, usize)) -> usize {
+        idx.0 * self.ny + idx.1
+    }
 }
 
 impl<T: FloatCore> Index<(usize, usize)> for DenseMat<T> {
     type Output = T;
 
     fn index(&self, index: (usize, usize)) -> &Self::Output {
-        &self.data[index.0 * self.ny + index.1]
+        &self.data[self.index_2d_to_1d(index)]
     }
 }
 
 impl<T: FloatCore> IndexMut<(usize, usize)> for DenseMat<T> {
     fn index_mut(&mut self, index: (usize, usize)) -> &mut Self::Output {
-        &mut self.data[index.0 * self.ny + index.1]
+        let idx = self.index_2d_to_1d(index);
+        &mut self.data[idx]
     }
 }
 
@@ -280,7 +302,7 @@ impl<T: FloatCore + AbsDiffEq<Epsilon = T>> AbsDiffEq for DenseMat<T> {
 
     fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
         self.nx == other.nx
-            && self.ny == other.nx
+            && self.ny == other.ny
             && self
                 .data
                 .iter()
@@ -497,5 +519,27 @@ mod tests {
         let mat = hilbert_mat::<f64>(10);
         let cond = mat.condition_number().unwrap();
         println!("condition number of hilbert 10 = {cond:e}");
+    }
+
+    #[test]
+    fn test_strictly_diagonally_dominant() {
+        let mat_0 = DenseMat::new(3, 3, vec![3., 2., 1., 1., -5., 6., -1., 2., 8.]);
+        assert!(mat_0.is_strictly_diagonally_dominant());
+
+        let mut mat_1 = DenseMat::new(3, 3, vec![3., 1., 9., 2., 8., 2., 6., 1., -2.]);
+        assert!(!mat_1.is_strictly_diagonally_dominant());
+
+        mat_1.swap_row(0, 2);
+        assert!(mat_1.is_strictly_diagonally_dominant());
+    }
+
+    #[test]
+    fn test_transpose() {
+        let mat_0 = DenseMat::new(2, 3, vec![3., 2., 1., 1., -5., 6.]);
+        let mat_1 = DenseMat::new(3, 2, vec![3., 1., 2., -5., 1., 6.]);
+        let mat_0_transpose = mat_0.transpose();
+
+        println!("mat_1 = {mat_1:?}, mat_0 transpose = {:?}", mat_0_transpose);
+        assert!(mat_0_transpose.abs_diff_eq(&mat_1, f64::EPSILON))
     }
 }
