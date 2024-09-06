@@ -5,7 +5,7 @@ use std::{
 
 use approx::AbsDiffEq;
 
-use crate::{permutation::Permutation, FloatCore};
+use crate::{mat_traits::MatShape, permutation::Permutation, FloatCore};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DenseMat<T> {
@@ -68,7 +68,7 @@ impl<T: FloatCore + Sum> DenseMat<T> {
         })
     }
 
-    pub fn jacobi_iterate(x_k: &[T], b: &[T], diagonal: &[T], l_plus_u: &Self) -> Vec<T> {
+    pub fn jacobi_iterate(x_k: &mut [T], b: &[T], diagonal: &[T], l_plus_u: &Self) {
         assert!(l_plus_u.is_square());
         let n = l_plus_u.nx;
         assert!(x_k.len() == n);
@@ -76,7 +76,7 @@ impl<T: FloatCore + Sum> DenseMat<T> {
         assert!(diagonal.len() == n);
 
         let x = l_plus_u.mul_vec(x_k);
-        (0..n).map(|i| (b[i] - x[i]) / diagonal[i]).collect()
+        (0..n).for_each(|i| x_k[i] = (b[i] - x[i]) / diagonal[i]);
     }
 }
 
@@ -285,18 +285,6 @@ impl<T> DenseMat<T> {
         Self { nx, ny, data }
     }
 
-    pub fn shape(&self) -> (usize, usize) {
-        (self.nx, self.ny)
-    }
-
-    pub fn is_square(&self) -> bool {
-        self.shape().0 == self.shape().1
-    }
-
-    pub fn shape_eq(&self, other: &Self) -> bool {
-        self.shape().0 == other.shape().0 && self.shape().1 == other.shape().1
-    }
-
     pub fn swap_row(&mut self, iy_0: usize, iy_1: usize) {
         (0..self.nx).for_each(|ix| self.swap_element((ix, iy_0), (ix, iy_1)))
     }
@@ -310,6 +298,12 @@ impl<T> DenseMat<T> {
     #[inline]
     fn index_2d_to_1d(&self, idx: (usize, usize)) -> usize {
         idx.0 * self.ny + idx.1
+    }
+}
+
+impl<T> MatShape for DenseMat<T> {
+    fn shape(&self) -> (usize, usize) {
+        (self.nx, self.ny)
     }
 }
 
@@ -623,8 +617,7 @@ mod tests {
         let b = [5.0; 2];
 
         (0..20).for_each(|_| {
-            let tmp = DenseMat::jacobi_iterate(&x, &b, &diagonal, &l_plus_u);
-            x = tmp;
+            DenseMat::jacobi_iterate(&mut x, &b, &diagonal, &l_plus_u);
         });
 
         (0..x.len()).for_each(|i| assert!(x[i].abs_diff_eq(&[1.0, 2.0][i], 1e-7)))
