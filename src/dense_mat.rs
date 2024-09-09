@@ -5,7 +5,11 @@ use std::{
 
 use approx::AbsDiffEq;
 
-use crate::{mat_traits::MatShape, permutation::Permutation, FloatCore};
+use crate::{
+    mat_traits::{MatOps, MatShape},
+    permutation::Permutation,
+    FloatCore,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DenseMat<T> {
@@ -15,14 +19,6 @@ pub struct DenseMat<T> {
 }
 
 impl<T: FloatCore + Sum> DenseMat<T> {
-    pub fn mul_vec(&self, b: &[T]) -> Vec<T> {
-        assert!(self.nx == b.len());
-
-        (0..self.ny)
-            .map(|iy| (0..self.nx).map(|ix| self[(ix, iy)] * b[ix]).sum())
-            .collect::<Vec<T>>()
-    }
-
     pub fn mul_mat(&self, other: &Self) -> Self {
         assert!(self.nx == other.ny);
 
@@ -68,15 +64,21 @@ impl<T: FloatCore + Sum> DenseMat<T> {
         })
     }
 
-    pub fn jacobi_iterate(x_k: &mut [T], b: &[T], diagonal: &[T], l_plus_u: &Self) {
-        assert!(l_plus_u.is_square());
-        let n = l_plus_u.nx;
+    pub fn gauss_seidel_iterate(&self, x_k: &mut [T], b: &[T]) {
+        assert!(self.is_square());
+        let n = self.nx();
         assert!(x_k.len() == n);
         assert!(b.len() == n);
-        assert!(diagonal.len() == n);
 
-        let x = l_plus_u.mul_vec(x_k);
-        (0..n).for_each(|i| x_k[i] = (b[i] - x[i]) / diagonal[i]);
+        for iy in 0..n {
+            let val = (b[iy]
+                - (0..n)
+                    .filter(|ix| *ix != iy)
+                    .map(|ix| self[(ix, iy)] * x_k[ix])
+                    .sum())
+                / self[(iy, iy)];
+            x_k[iy] = val;
+        }
     }
 }
 
@@ -304,6 +306,16 @@ impl<T> DenseMat<T> {
 impl<T> MatShape for DenseMat<T> {
     fn shape(&self) -> (usize, usize) {
         (self.nx, self.ny)
+    }
+}
+
+impl<T: FloatCore + Sum> MatOps<T> for DenseMat<T> {
+    fn mul_vec(&self, b: &[T]) -> Vec<T> {
+        assert!(self.nx == b.len());
+
+        (0..self.ny)
+            .map(|iy| (0..self.nx).map(|ix| self[(ix, iy)] * b[ix]).sum())
+            .collect::<Vec<T>>()
     }
 }
 
@@ -621,5 +633,22 @@ mod tests {
         });
 
         (0..x.len()).for_each(|i| assert!(x[i].abs_diff_eq(&[1.0, 2.0][i], 1e-7)))
+    }
+
+    #[test]
+    fn test_guass_seidel_iterate_0() {
+        let mat = DenseMat::new(3, 3, vec![3., 2., -1., 1., 4., 2., -1., 1., 5.]);
+
+        let mut x = vec![0.0; 3];
+        let b = [4., 1., 1.];
+
+        (0..21).for_each(|i| {
+            mat.gauss_seidel_iterate(&mut x, &b);
+            if i < 2 {
+                println!("x = {x:?}")
+            }
+        });
+
+        (0..x.len()).for_each(|i| assert!(x[i].abs_diff_eq(&[2., -1., 1.][i], 1e-7)))
     }
 }
