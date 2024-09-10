@@ -8,7 +8,7 @@ use approx::AbsDiffEq;
 use crate::{
     mat_traits::{MatOps, MatShape},
     permutation::Permutation,
-    FloatCore,
+    Float, FloatCore,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +79,31 @@ impl<T: FloatCore + Sum> DenseMat<T> {
                 / self[(iy, iy)];
             x_k[iy] = val;
         }
+    }
+}
+
+impl<T: Float + FloatCore + Sum> DenseMat<T> {
+    pub fn cholesky_factorization(&mut self) -> Option<Self> {
+        assert!(self.is_square());
+
+        let mut r_mat = DenseMat::zeros(self.nx, self.ny);
+
+        for iy in 0..self.ny {
+            if self[(iy, iy)] < T::zero() {
+                return None;
+            }
+            r_mat[(iy, iy)] = self[(iy, iy)].sqrt();
+            for ix in (iy + 1)..self.nx {
+                r_mat[(ix, iy)] = self[(ix, iy)] / r_mat[(iy, iy)];
+            }
+            for a in (iy + 1)..self.nx {
+                for b in (iy + 1)..self.ny {
+                    self[(a, b)] = self[(a, b)] - r_mat[(a, iy)] * r_mat[(b, iy)];
+                }
+            }
+        }
+
+        Some(r_mat)
     }
 }
 
@@ -449,7 +474,7 @@ mod tests {
         let mat = DenseMat::new(3, 3, vec![1., 2., -3., -1., -2., 3., -1., -2., 1.]);
         let b = vec![3., 3., -6.];
         let sol = mat.gaussian_elimination_solve(&b);
-        assert!(sol.iter().filter(|x| x.is_nan()).count() > 0);
+        assert!(sol.iter().filter(|x| FloatCore::is_nan(**x)).count() > 0);
         println!("sol = {sol:?}")
     }
 
@@ -505,8 +530,8 @@ mod tests {
     fn test_lu_5() {
         let mat = DenseMat::new(3, 3, vec![1., 2., -3., -1., -2., 3., -1., -2., 1.]);
         let (l_mat, u_mat) = mat.lu();
-        assert!(l_mat.data.iter().filter(|x| x.is_nan()).count() > 0);
-        assert!(u_mat.data.iter().filter(|x| x.is_nan()).count() > 0);
+        assert!(l_mat.data.iter().filter(|x| FloatCore::is_nan(**x)).count() > 0);
+        assert!(u_mat.data.iter().filter(|x| FloatCore::is_nan(**x)).count() > 0);
     }
 
     #[test]
@@ -650,5 +675,13 @@ mod tests {
         });
 
         (0..x.len()).for_each(|i| assert!(x[i].abs_diff_eq(&[2., -1., 1.][i], 1e-7)))
+    }
+
+    #[test]
+    fn test_cholesky_factorization() {
+        let mut mat = DenseMat::new(3, 3, vec![4., -2., 2., -2., 2., -4., 2., -4., 11.]);
+        let r = mat.cholesky_factorization().unwrap();
+        let sol = DenseMat::new(3, 3, vec![2., 0., 0., -1., 1., 0., 1., -3., 1.]);
+        assert!(r.abs_diff_eq(&sol, 1e-14))
     }
 }
