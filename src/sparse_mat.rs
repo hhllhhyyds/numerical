@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::iter::Sum;
 
 use crate::FloatCore;
 
@@ -143,7 +144,7 @@ impl<T> MatShape for SparseMat<T> {
     }
 }
 
-impl<T: FloatCore> MatOps<T> for SparseMat<T> {
+impl<T: FloatCore + Sum> MatOps<T> for SparseMat<T> {
     fn mul_vec(&self, b: &[T]) -> Vec<T> {
         assert!(self.nx == b.len());
 
