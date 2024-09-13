@@ -84,15 +84,114 @@ impl<T: Clone> SparseMat<T> {
 }
 
 impl<T: FloatCore> SparseMat<T> {
-    /// Transpose is needed before run gauss seidel iteration,
-    /// because this method rely on the sorted BTreeMap
+    pub fn mul_diagonal(&self, diag: &[T]) -> Self {
+        assert!(self.nx == diag.len());
+
+        let mut mat = Self {
+            nx: self.nx,
+            ny: self.ny,
+            data: BTreeMap::default(),
+        };
+
+        for (&(ix, iy), &val) in self.data.iter() {
+            mat.set((ix, iy), val * diag[ix])
+        }
+
+        mat
+    }
+
+    pub fn add_mat(&self, other: &Self) -> Self {
+        assert!(self.shape_eq(other));
+
+        let mut mat = self.clone();
+
+        for (&(ix, iy), &val) in other.data.iter() {
+            let sum = *mat.get((ix, iy)).unwrap_or(&T::zero()) + val;
+            mat.set((ix, iy), sum);
+        }
+
+        mat
+    }
+
+    pub fn sub_mat(&self, other: &Self) -> Self {
+        assert!(self.shape_eq(other));
+
+        let mut mat = self.clone();
+
+        for (&(ix, iy), &val) in other.data.iter() {
+            let sub = *mat.get((ix, iy)).unwrap_or(&T::zero()) - val;
+            mat.set((ix, iy), sub);
+        }
+
+        mat
+    }
+
+    pub fn back_substitute_lower_triangle(&self, b: &[T]) -> Vec<T> {
+        assert!(self.nx == b.len());
+        assert!(self.is_square());
+
+        let mut y = vec![];
+
+        let transpose = self.transpose();
+
+        let mut iter = transpose.data.iter();
+        let mut elem = iter.next();
+        #[allow(clippy::needless_range_loop)]
+        for ix_now in 0..transpose.nx {
+            let mut y_i = b[ix_now];
+            while let Some((&(ix, iy), &val)) = elem {
+                if ix == ix_now {
+                    if iy < ix_now {
+                        y_i = y_i - y[iy] * val;
+                    }
+                } else {
+                    break;
+                }
+                elem = iter.next();
+            }
+            y.push(y_i / *transpose.get((ix_now, ix_now)).unwrap_or(&T::zero()));
+        }
+
+        y
+    }
+
+    pub fn back_substitute_upper_triangle(&self, b: &[T]) -> Vec<T> {
+        assert!(self.nx == b.len());
+        assert!(self.is_square());
+
+        let mut y = vec![T::zero(); self.nx];
+
+        let transpose = self.transpose();
+
+        let mut iter = transpose.data.iter().rev();
+        let mut elem = iter.next();
+        for ix_now in (0..transpose.nx).rev() {
+            y[ix_now] = b[ix_now];
+            while let Some((&(ix, iy), &val)) = elem {
+                if ix == ix_now {
+                    if iy > ix_now {
+                        y[ix_now] = y[ix_now] - y[iy] * val;
+                    }
+                } else {
+                    break;
+                }
+                elem = iter.next();
+            }
+            y[ix_now] = y[ix_now] / *transpose.get((ix_now, ix_now)).unwrap_or(&T::zero());
+        }
+
+        y
+    }
+
     pub fn gauss_seidel_iterate(&self, x_k: &mut [T], b: &[T]) {
         assert!(self.is_square());
         let n = self.nx();
         assert!(x_k.len() == n);
         assert!(b.len() == n);
 
-        let mut iter = self.data.iter();
+        let transpose = self.transpose();
+
+        let mut iter = transpose.data.iter();
         let mut elem = iter.next();
         for ix_now in 0..n {
             let mut sum = T::zero();
@@ -106,19 +205,20 @@ impl<T: FloatCore> SparseMat<T> {
                 }
                 elem = iter.next();
             }
-            x_k[ix_now] = (b[ix_now] - sum) / *self.get((ix_now, ix_now)).unwrap_or(&T::zero());
+            x_k[ix_now] =
+                (b[ix_now] - sum) / *transpose.get((ix_now, ix_now)).unwrap_or(&T::zero());
         }
     }
 
-    /// Transpose is needed before run gauss seidel iteration,
-    /// because this method rely on the sorted BTreeMap
     pub fn sor_gauss_seidel_iterate(&self, x_k: &mut [T], b: &[T], omega: T) {
         assert!(self.is_square());
         let n = self.nx();
         assert!(x_k.len() == n);
         assert!(b.len() == n);
 
-        let mut iter = self.data.iter();
+        let transpose = self.transpose();
+
+        let mut iter = transpose.data.iter();
         let mut elem = iter.next();
         for ix_now in 0..n {
             let mut sum = T::zero();
@@ -133,7 +233,8 @@ impl<T: FloatCore> SparseMat<T> {
                 elem = iter.next();
             }
             x_k[ix_now] = (T::one() - omega) * x_k[ix_now]
-                + omega * (b[ix_now] - sum) / *self.get((ix_now, ix_now)).unwrap_or(&T::zero());
+                + omega * (b[ix_now] - sum)
+                    / *transpose.get((ix_now, ix_now)).unwrap_or(&T::zero());
         }
     }
 }
@@ -160,6 +261,8 @@ impl<T: FloatCore + Sum> MatOps<T> for SparseMat<T> {
 #[cfg(test)]
 mod tests {
     use approx::AbsDiffEq;
+
+    use crate::dense_mat::DenseMat;
 
     use super::*;
 
@@ -330,7 +433,7 @@ mod tests {
     #[test]
     fn test_guass_seidel_iterate_0() {
         let mat = SparseMat::full_from_vec(3, 3, vec![3., 2., -1., 1., 4., 2., -1., 1., 5.]);
-        let mat = mat.transpose();
+
         let mut x = vec![0.0; 3];
         let b = [4., 1., 1.];
 
@@ -562,5 +665,101 @@ mod tests {
             .iter()
             .zip(sol.iter())
             .all(|(a, b)| a.abs_diff_eq(b, 1e-3)));
+    }
+
+    #[test]
+    fn test_back_substitute_lower_triangle_0() {
+        let dense_mat = DenseMat::new(3, 3, vec![1., 2., 3., 0., 4., 5., 0., 0., 6.]);
+        let sparse_mat = SparseMat::new(
+            3,
+            3,
+            vec![
+                (0, 0, 1.),
+                (0, 1, 2.),
+                (0, 2, 3.),
+                (1, 1, 4.),
+                (1, 2, 5.),
+                (2, 2, 6.),
+            ]
+            .into_iter(),
+        );
+
+        let b = [1.3, -2.4, 3.5];
+
+        let x_0 = dense_mat.back_substitute_lower_triangle(&b);
+        let x_1 = sparse_mat.back_substitute_lower_triangle(&b);
+
+        x_0.iter()
+            .zip(x_1.iter())
+            .for_each(|(a, b)| assert!(a == b))
+    }
+
+    #[test]
+    fn test_back_substitute_lower_triangle_1() {
+        let dense_mat = DenseMat::new(3, 3, vec![1., 0., 3., 0., 4., 5., 0., 0., 6.]);
+        let sparse_mat = SparseMat::new(
+            3,
+            3,
+            vec![(0, 0, 1.), (0, 2, 3.), (1, 1, 4.), (1, 2, 5.), (2, 2, 6.)].into_iter(),
+        );
+
+        let b = [1.3, -2.4, 3.5];
+
+        let x_0 = dense_mat.back_substitute_lower_triangle(&b);
+        let x_1 = sparse_mat.back_substitute_lower_triangle(&b);
+
+        x_0.iter()
+            .zip(x_1.iter())
+            .for_each(|(a, b)| assert!(a == b))
+    }
+
+    #[test]
+    fn test_back_substitute_upper_triangle_0() {
+        let dense_mat = DenseMat::new(3, 3, vec![1., 0., 0., 2., 3., 0., 4., 5., 6.]);
+        let sparse_mat = SparseMat::new(
+            3,
+            3,
+            vec![
+                (0, 0, 1.),
+                (1, 0, 2.),
+                (1, 1, 3.),
+                (2, 0, 4.),
+                (2, 1, 5.),
+                (2, 2, 6.),
+            ]
+            .into_iter(),
+        );
+
+        let b = [1.3, -2.4, 3.5];
+
+        let x_0 = dense_mat.back_substitute_upper_triangle(&b);
+        let x_1 = sparse_mat.back_substitute_upper_triangle(&b);
+
+        println!("x_0 = {x_0:?}, x_1 = {x_1:?}");
+
+        x_0.iter()
+            .zip(x_1.iter())
+            .for_each(|(a, b)| assert!(a.abs_diff_eq(b, 1e-14)))
+    }
+
+    #[test]
+    fn test_back_substitute_upper_triangle_1() {
+        let dense_mat = DenseMat::new(3, 3, vec![1., 0., 0., 2., 3., 0., 4., 0., 6.]);
+        let sparse_mat = SparseMat::new(
+            3,
+            3,
+            vec![(0, 0, 1.), (1, 0, 2.), (1, 1, 3.), (2, 0, 4.), (2, 2, 6.)].into_iter(),
+        );
+
+        let b = [1.3, -2.4, 3.5];
+
+        let x_0 = dense_mat.back_substitute_upper_triangle(&b);
+        let x_1 = sparse_mat.back_substitute_upper_triangle(&b);
+
+        println!("x_0 = {x_0:?}, x_1 = {x_1:?}");
+
+        x_0.iter()
+            .zip(x_1.iter())
+            .for_each(|(a, b)| assert!(a == b))
     }
 }

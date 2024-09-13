@@ -62,16 +62,14 @@ pub trait MatOps<T: crate::FloatCore + Sum>: MatShape {
 
     fn preconditioned_conjugate_gradient_iterate(
         &self,
-        preconditioner_inv: &Self,
+        preconditioner_inv_mul: &dyn Fn(&[T]) -> Vec<T>,
         x: &mut [T],
         r: &mut [T],
         d: &mut [T],
         z: &mut [T],
     ) {
         assert!(self.is_square());
-        assert!(preconditioner_inv.is_square());
         let n = self.nx();
-        assert!(n == preconditioner_inv.nx());
         assert!(n == x.len());
         assert!(n == r.len());
         assert!(n == d.len());
@@ -89,8 +87,10 @@ pub trait MatOps<T: crate::FloatCore + Sum>: MatShape {
             .zip(a_mul_d)
             .for_each(|(r_i, a_mul_d_i)| *r_i = *r_i - alpha * a_mul_d_i);
 
+        let v = preconditioner_inv_mul(r);
+        assert!(v.len() == n);
         z.iter_mut()
-            .zip(preconditioner_inv.mul_vec(r))
+            .zip(v)
             .for_each(|(z_i, z_next_i)| *z_i = z_next_i);
 
         let beta = r.iter().zip(z.iter()).map(|(&a, &b)| a * b).sum::<T>() / r_z_dot;
@@ -237,7 +237,7 @@ mod tests {
         let iter_count = 20;
         for _ in 0..iter_count {
             mat.preconditioned_conjugate_gradient_iterate(
-                &perdictioner_inv,
+                &|r| perdictioner_inv.mul_vec(r),
                 &mut x,
                 &mut r,
                 &mut d,
