@@ -684,4 +684,70 @@ mod tests {
         let sol = DenseMat::new(3, 3, vec![2., 0., 0., -1., 1., 0., 1., -3., 1.]);
         assert!(r.abs_diff_eq(&sol, 1e-14))
     }
+
+    #[test]
+    fn test_nonlinear_newton_method_0() {
+        let f = |x: &Vec<f64>| -> Vec<f64> {
+            assert!(x.len() == 2);
+            let (u, v) = (x[0], x[1]);
+            vec![v - u.powi(3), u.powi(2) + v.powi(2) - 1.]
+        };
+        let df = |x: &Vec<f64>| -> DenseMat<f64> {
+            assert!(x.len() == 2);
+            let (u, v) = (x[0], x[1]);
+            DenseMat::new(2, 2, vec![-3. * u.powi(2), 2. * u, 1., 2. * v])
+        };
+
+        let mut x = vec![1., 2.];
+
+        for _ in 0..6 {
+            let s = df(&x).plu_solve(&f(&x).iter().map(|x| -x).collect::<Vec<_>>());
+            x.iter_mut().zip(s.iter()).for_each(|(a, b)| *a += b);
+
+            println!("x = {x:?}")
+        }
+
+        let y = f(&x);
+        y.iter()
+            .for_each(|val| assert!(val.abs_diff_eq(&0.0, 1e-14)))
+    }
+
+    #[test]
+    fn test_nonlinear_newton_method_1() {
+        let f = |x: &Vec<f64>| -> Vec<f64> {
+            assert!(x.len() == 2);
+            let (u, v) = (x[0], x[1]);
+            vec![
+                6. * u.powi(3) + u * v - 3. * v.powi(3) - 4.,
+                u.powi(2) - 18. * u * v.powi(2) + 16. * v.powi(3) + 1.,
+            ]
+        };
+        let df = |x: &Vec<f64>| -> DenseMat<f64> {
+            assert!(x.len() == 2);
+            let (u, v) = (x[0], x[1]);
+            DenseMat::new(
+                2,
+                2,
+                vec![
+                    18. * u.powi(2) + v,
+                    2. * u - 18. * v.powi(2),
+                    u - 9. * v.powi(2),
+                    -36. * u * v + 48. * v.powi(2),
+                ],
+            )
+        };
+
+        let mut x = vec![2., 2.];
+
+        for _ in 0..6 {
+            let s = df(&x).plu_solve(&f(&x).iter().map(|x| -x).collect::<Vec<_>>());
+            x.iter_mut().zip(s.iter()).for_each(|(a, b)| *a += b);
+
+            println!("x = {x:?}, y = {:?}", f(&x));
+        }
+
+        let y = f(&x);
+        y.iter()
+            .for_each(|val| assert!(val.abs_diff_eq(&0.0, 1e-14)))
+    }
 }
