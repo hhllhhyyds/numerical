@@ -20,41 +20,41 @@ pub struct DenseMat<T> {
 
 impl<T: FloatCore + Sum> DenseMat<T> {
     pub fn mul_mat(&self, other: &Self) -> Self {
+        let mut mat = Self::zeros(other.nx, self.ny);
+        self.mul_mat_local(other, &mut mat);
+        mat
+    }
+
+    pub fn mul_mat_local(&self, other: &Self, store: &mut Self) {
         assert!(self.nx == other.ny);
 
         let nx = other.nx;
         let ny = self.ny;
 
-        let mut mat = Self::zeros(nx, ny);
+        assert!(store.nx == nx && store.ny == ny);
 
         for iy in 0..ny {
             for ix in 0..nx {
-                mat[(ix, iy)] = (0..self.nx).map(|j| self[(j, iy)] * other[(ix, j)]).sum();
+                store[(ix, iy)] = (0..self.nx).map(|j| self[(j, iy)] * other[(ix, j)]).sum();
             }
         }
-
-        mat
     }
 
     pub fn mat_norm(&self) -> Option<T> {
         assert!(self.is_square());
+
         (0..self.ny)
             .map(|iy| (0..self.nx).map(|ix| self[(ix, iy)].abs()).sum())
             .reduce(T::max)
     }
 
     pub fn condition_number(&self) -> Option<T> {
-        if let Some(norm_0) = self.mat_norm() {
-            let inv = self.inverse();
-            let norm_1 = inv.mat_norm().unwrap();
-            Some(norm_0 * norm_1)
-        } else {
-            None
-        }
+        Some(self.mat_norm()? * self.inverse().mat_norm()?)
     }
 
     pub fn is_strictly_diagonally_dominant(&self) -> bool {
         assert!(self.is_square());
+
         (0..self.ny).all(|iy| {
             (0..self.nx)
                 .filter(|ix| *ix != iy)
@@ -65,12 +65,14 @@ impl<T: FloatCore + Sum> DenseMat<T> {
     }
 
     pub fn gauss_seidel_iterate(&self, x_k: &mut [T], b: &[T]) {
-        assert!(self.is_square());
-        let n = self.nx();
+        let n = {
+            assert!(self.is_square());
+            self.nx()
+        };
         assert!(x_k.len() == n);
         assert!(b.len() == n);
 
-        for iy in 0..n {
+        (0..n).for_each(|iy| {
             let val = (b[iy]
                 - (0..n)
                     .filter(|ix| *ix != iy)
@@ -78,7 +80,7 @@ impl<T: FloatCore + Sum> DenseMat<T> {
                     .sum())
                 / self[(iy, iy)];
             x_k[iy] = val;
-        }
+        })
     }
 }
 
@@ -113,9 +115,7 @@ impl<T: FloatCore> DenseMat<T> {
     }
 
     pub fn identity(n: usize) -> Self {
-        let mut mat = Self::zeros(n, n);
-        (0..n).for_each(|i| mat[(i, i)] = T::one());
-        mat
+        Self::from_diagonal(&vec![T::one(); n])
     }
 
     pub fn from_diagonal(diag: &[T]) -> Self {
