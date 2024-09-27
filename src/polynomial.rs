@@ -1,5 +1,6 @@
 use crate::FloatCore;
 
+#[derive(Clone, Debug)]
 pub struct Polynomial<T: FloatCore> {
     coes: Vec<T>,
     base_points: Option<Vec<T>>,
@@ -39,6 +40,54 @@ impl<T: FloatCore> Polynomial<T> {
         }
 
         y
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PolynomialInterpolator<T: FloatCore> {
+    poly: Polynomial<T>,
+    last_x: T,
+    temp_coe: Vec<T>,
+    x_diff_eps: T,
+}
+
+impl<T: FloatCore> PolynomialInterpolator<T> {
+    pub fn new(x_0: T, y_0: T, x_diff_eps: T) -> Self {
+        let poly = Polynomial::new(&[y_0]);
+        let last_x = x_0;
+        let temp_coe = vec![y_0];
+        assert!(x_diff_eps > T::zero());
+        Self {
+            poly,
+            last_x,
+            temp_coe,
+            x_diff_eps,
+        }
+    }
+
+    pub fn add_point(&mut self, x: T, y: T) {
+        if let Some(v) = &mut self.poly.base_points {
+            for bp in v.iter() {
+                assert!((*bp - x).abs() > self.x_diff_eps);
+            }
+            v.insert(0, self.last_x)
+        } else {
+            self.poly.base_points = Some(vec![self.last_x])
+        }
+        self.last_x = x;
+
+        let mut coe = y;
+        for i in 0..self.temp_coe.len() {
+            let old_coe = self.temp_coe[i];
+            self.temp_coe[i] = coe;
+            coe = (coe - old_coe) / (self.last_x - self.poly.base_points.as_ref().unwrap()[i]);
+        }
+        self.temp_coe.push(coe);
+        self.poly.coes.insert(0, coe);
+    }
+
+    pub fn poly(&self) -> &Polynomial<T> {
+        &self.poly
     }
 }
 
