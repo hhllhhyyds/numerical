@@ -1,5 +1,5 @@
-use numerical_algos::mat_traits::*;
-use numerical_algos::sparse_mat::SparseMat;
+use numerical_algos::matrix::mat_traits::*;
+use numerical_algos::matrix::sparse_mat::SparseMat;
 
 use plotters::prelude::*;
 
@@ -23,19 +23,14 @@ fn main() {
         SparseMat::new(n, n, (0..n).map(|i| (i, i, 1.0 / ((i + 1) as f64).sqrt())));
 
     let omega = 1.2;
-    let l_mat = SparseMat::new(n, n, elems_l)
-        .mul_diagonal(
-            &elems_d
-                .clone()
-                .map(|(_, _, val)| omega / val)
-                .collect::<Vec<_>>(),
-        )
-        .add_mat(&SparseMat::new(n, n, (0..n).map(|i| (i, i, 1.0))));
-    let u_mat = SparseMat::new(n, n, elems_d).add_mat(&SparseMat::new(
-        n,
-        n,
-        elems_u.map(|(ix, iy, val)| (ix, iy, omega * val)),
-    ));
+    let l_mat = &SparseMat::new(n, n, elems_l).mul_diagonal(
+        &elems_d
+            .clone()
+            .map(|(_, _, val)| omega / val)
+            .collect::<Vec<_>>(),
+    ) + &SparseMat::new(n, n, (0..n).map(|i| (i, i, 1.0)));
+    let u_mat = &SparseMat::new(n, n, elems_d)
+        + &SparseMat::new(n, n, elems_u.map(|(ix, iy, val)| (ix, iy, omega * val)));
     let preconditioner_gauss_seidel_inv_mul_fn = |v: &[f64]| {
         assert!(v.len() == n);
         let c = l_mat.back_substitute_lower_triangle(v);

@@ -1,3 +1,5 @@
+use super::mat_shape::MatShape;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Permutation(Vec<usize>);
 
@@ -20,5 +22,14 @@ impl Permutation {
         }
 
         permu_v
+    }
+}
+
+impl MatShape for Permutation {
+    fn nx(&self) -> usize {
+        self.0.len()
+    }
+    fn ny(&self) -> usize {
+        self.0.len()
     }
 }

@@ -68,7 +68,7 @@ impl<T: FloatCore> PolynomialInterpolator<T> {
     pub fn interpolation_series(mut series: impl Iterator<Item = (T, T)>, x_diff_eps: T) -> Self {
         let p0 = series.next().expect("Error: empty serise");
         let mut ret = Self::new(p0.0, p0.1, x_diff_eps);
-        while let Some(p) = series.next() {
+        for p in series {
             ret.add_point(p.0, p.1);
         }
         ret
